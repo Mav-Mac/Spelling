@@ -266,6 +266,8 @@ textarea { min-height: 110px; resize: vertical; }
     <p id="aiStatus"></p>
     <p id="storeStatus"></p>
     <p id="voiceStatus"></p>
+    <div class="tools"><button id="voiceTestBtn">Test the natural voice</button></div>
+    <p id="voiceTest" role="status"></p>
   </div>
 </section>
 
@@ -343,7 +345,7 @@ function b64ToBuf(b64) { const s = atob(b64), u = new Uint8Array(s.length); for 
 
 /* Recording queue: one request at a time, waits when Gemini says slow down, gives up after repeated failures. */
 const queue = [];
-let pumping = false, voiceOff = false, hardFails = 0, waits = 0;
+let pumping = false, voiceOff = false, hardFails = 0, waits = 0, voiceErr = "";
 function want(text, front) {
   if (!serverOk || voiceOff || !text) return;
   const k = clipKey(text);
@@ -360,13 +362,33 @@ async function pump() {
     try {
       const j = await api("speak", { text: t });
       await clipPut(clipKey(t), b64ToBuf(j.audio));
-      queue.shift(); hardFails = 0; renderStatus();
+      queue.shift(); hardFails = 0; voiceErr = ""; renderStatus();
     } catch (e) {
+      voiceErr = describeErr(e); renderStatus();
       if (e && e.status === 429 && waits < 40) { waits++; await sleep(Math.min(60, Math.max(5, Number(e.retry) || 21)) * 1000); }
       else { queue.shift(); hardFails++; if (hardFails >= 3 || (e && e.status === 429)) { voiceOff = true; queue.length = 0; renderStatus(); } }
     }
   }
   pumping = false;
+}
+function describeErr(e) {
+  const st = e && e.status ? e.status : "no reply";
+  const what = st === 429 ? "Gemini says the key has hit its speed or daily limit" : st === 501 ? "GEMINI_API_KEY is not set on the site" : "Gemini returned an error";
+  return what + " (" + st + (e && e.message ? ": " + String(e.message).slice(0, 220) : "") + ")";
+}
+async function testVoice() {
+  const out = $("voiceTest");
+  unlockAudio();
+  out.textContent = "Asking Gemini for a test clip…";
+  try {
+    const t0 = Date.now();
+    const j = await api("speak", { text: "Hello! This is the natural voice." });
+    const buf = await actx.decodeAudioData(b64ToBuf(j.audio));
+    out.textContent = "It works. The clip took " + ((Date.now() - t0) / 1000).toFixed(1) + " seconds. You should hear it now.";
+    stopSpeech(); try { await actx.resume(); } catch {} playBuf(buf);
+  } catch (e) {
+    out.textContent = e && (e.status || e.message) && !(e instanceof Error) ? "Not working: " + describeErr(e) : "Not working: the clip came back but this device could not play it.";
+  }
 }
 function recordVoices(firstWords) {
   if (!serverOk) return;
@@ -745,6 +767,7 @@ async function renderStatus() {
     v = voiceOff ? "The natural voice could not be recorded right now (" + have + " of " + list.length + " words ready). The device voice fills in. Reload the page later to try again."
       : have >= list.length ? "Natural voice is ready for all " + list.length + " words on this device."
       : "Recording the natural voice: " + have + " of " + list.length + " words ready on this device. This can take a few minutes on a free Gemini key. The device voice fills in until then.";
+    if (voiceErr) v += " Last problem: " + voiceErr + ".";
   } else if (serverChecked) v = "Using this device's built-in voice.";
   $("voiceStatus").textContent = v;
 }
@@ -842,6 +865,7 @@ $("sentencesBtn").onclick = onSentences;
 $("clearAll").onclick = () => { rows = []; renderRows(); $("toolStatus").textContent = "All words removed. Tap Save list to keep this change."; };
 $("clearScores").onclick = () => { progress = {}; lsSet(LS_PROG, progress); renderRows(); $("toolStatus").textContent = "Counts reset."; };
 $("saveBtn").onclick = onSave;
+$("voiceTestBtn").onclick = testVoice;
 $("rows").addEventListener("input", (e) => { const t = e.target; if (t.dataset && t.dataset.f && rows[t.dataset.i]) rows[t.dataset.i][t.dataset.f] = t.value; });
 $("rows").addEventListener("click", (e) => { const b = e.target.closest("[data-rm]"); if (!b) return; rows.splice(Number(b.dataset.rm), 1); renderRows(); });
 
