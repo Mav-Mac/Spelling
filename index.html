@@ -141,6 +141,7 @@ textarea { min-height: 110px; resize: vertical; }
 .tools button { min-height: 48px; box-shadow: 0 3px 0 var(--ink); }
 #saveStatus, #aiStatus, #toolStatus { color: var(--ink-soft); }
 #saveStatus.ok { color: var(--good); font-weight: 700; }
+#saveStatus.bad { color: #b3261e; font-weight: 700; }
 .file { position: absolute; width: 1px; height: 1px; opacity: 0; }
 @media (max-width: 520px) {
   .wrow { grid-template-columns: 1fr 48px; }
@@ -250,6 +251,10 @@ textarea { min-height: 110px; resize: vertical; }
       <button id="clearAll" class="plain">Remove all words</button>
       <button id="clearScores" class="plain">Reset right and missed counts</button>
     </div>
+    <div id="pwBox">
+      <label for="pw">Parent password</label>
+      <input id="pw" type="password" autocomplete="current-password" style="max-width: 320px">
+    </div>
     <div class="tools">
       <button id="saveBtn" class="primary">Save list</button>
       <p id="saveStatus" role="status"></p>
@@ -257,18 +262,9 @@ textarea { min-height: 110px; resize: vertical; }
   </div>
 
   <div class="card">
-    <h2>Use this list on another device</h2>
-    <p class="note">Lists are saved on the device you type them on. To move a saved list to his tablet, open this link there.</p>
-    <div class="tools">
-      <button id="linkBtn">Make a link for this list</button>
-    </div>
-    <label for="linkOut" id="linkLabel" hidden>Link (copied if your browser allows it)</label>
-    <input id="linkOut" type="text" readonly hidden>
-  </div>
-
-  <div class="card">
     <h2>Setup status</h2>
     <p id="aiStatus"></p>
+    <p id="storeStatus"></p>
     <p id="voiceStatus"></p>
   </div>
 </section>
@@ -313,7 +309,7 @@ async function api(task, body) {
   return j || {};
 }
 const serverReady = fetch("/api/ai").then((r) => (r.ok ? r.json() : null)).then((j) => { serverOk = !!(j && j.ok && j.key); })
-  .catch(() => {}).then(() => { serverChecked = true; renderStatus(); recordVoices(); });
+  .catch(() => {}).then(() => { serverChecked = true; renderStatus(); if (loaded) recordVoices(); });
 const aiReady = () => serverOk;
 
 /* ---------- voice clips: made once by Gemini, kept on this device ---------- */
@@ -435,46 +431,56 @@ async function say(...texts) {
   deviceSay(texts.join(". "));
 }
 
-/* ---------- data (saved on this device) ---------- */
+/* ---------- data: the shared list lives on the site (/api/words); this device keeps a copy ---------- */
+const LS_PW = "spellingpad.pw";
 let list = [], usingExamples = true, progress = {};
+let shared = { checked: false, storage: false, password: false };
+let loaded = false;
 function applyList(words) {
   const ok = Array.isArray(words) ? words.map((x) => ({ w: cleanWord(x && x.w), s: String((x && x.s) || "").slice(0, 160) })).filter((x) => x.w) : [];
   usingExamples = ok.length === 0;
   list = usingExamples ? EXAMPLES.slice() : ok;
 }
-function saveList(words) { applyList(words); lsSet(LS_LIST, { words }); recordVoices(); }
-const b64u = {
-  enc: (s) => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""),
-  dec: (s) => decodeURIComponent(escape(atob(s.replace(/-/g, "+").replace(/_/g, "/")))),
-};
-function loadData() {
-  let fromLink = false;
-  const m = /^#list=([\w-]+)$/.exec(location.hash);
-  if (m) {
-    try {
-      const arr = JSON.parse(b64u.dec(m[1]));
-      const words = arr.map((p) => ({ w: cleanWord(p[0]), s: String(p[1] || "") })).filter((x) => x.w);
-      if (words.length) { saveList(words); fromLink = true; }
-    } catch {}
-    try { history.replaceState(null, "", location.pathname); } catch {}
-  }
-  if (!fromLink) { const c = lsGet(LS_LIST); applyList(c && c.words); }
-  progress = lsGet(LS_PROG) || {};
-  renderHome(fromLink);
+async function fetchShared() {
+  try {
+    const r = await Promise.race([fetch("/api/words", { cache: "no-store" }), sleep(8000).then(() => null)]);
+    const j = r && r.ok ? await r.json() : null;
+    if (!j) return false;
+    shared = { checked: true, storage: !!j.storage, password: !!j.password };
+    if (j.storage && Array.isArray(j.words) && j.words.length) {
+      applyList(j.words);
+      lsSet(LS_LIST, { words: usingExamples ? [] : list });
+      return true;
+    }
+  } catch {}
+  shared.checked = true;
+  return false;
 }
+async function loadData() {
+  const c = lsGet(LS_LIST);
+  applyList(c && c.words);
+  progress = lsGet(LS_PROG) || {};
+  renderHome();
+  await fetchShared();
+  loaded = true;
+  renderHome(); renderStatus(); recordVoices();
+}
+/* Pick up a list changed on another device when the tablet comes back to the home screen. */
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState !== "visible" || !loaded || S.screen !== "home") return;
+  if (await fetchShared()) { renderHome(); recordVoices(); }
+});
 
 /* ---------- screens ---------- */
 const SCREENS = ["home", "gate", "play", "done", "parent"];
 let S = { screen: "home", words: [], queue: [], idx: 0, phase: "write", results: {}, read: "", viaAi: false, msg: "", kind: "" };
 const cur = () => S.queue[S.idx];
 function show(name) { for (const s of SCREENS) $(s).hidden = s !== name; S.screen = name; }
-function renderHome(fromLink) {
+function renderHome() {
   const n = list.length;
-  $("homeCount").textContent = n + (n === 1 ? " word" : " words") + " ready";
-  const note = $("exampleNote");
-  note.hidden = !(usingExamples || fromLink);
-  note.textContent = fromLink ? "New word list loaded from your link." : "These are example words. A grown-up can add this week's list.";
-  $("startBtn").disabled = n === 0;
+  $("homeCount").textContent = loaded ? n + (n === 1 ? " word" : " words") + " ready" : "Getting your words…";
+  $("exampleNote").hidden = !(loaded && usingExamples);
+  $("startBtn").disabled = !loaded || n === 0;
 }
 
 /* ---------- a round ---------- */
@@ -686,7 +692,8 @@ function openGate() {
 function openParent() {
   rows = usingExamples ? [] : list.map((x) => ({ w: x.w, s: x.s }));
   $("saveStatus").textContent = ""; $("saveStatus").className = ""; $("toolStatus").textContent = "";
-  $("linkOut").hidden = $("linkLabel").hidden = true;
+  $("pw").value = lsGet(LS_PW) || "";
+  $("saveBtn").disabled = false;
   renderRows(); renderStatus(); show("parent");
 }
 function renderRows() {
@@ -726,6 +733,11 @@ async function renderStatus() {
   $("aiStatus").textContent = !serverChecked ? "Checking the connection…"
     : aiReady() ? "Handwriting checking is on. Gemini reads his writing when he taps Check."
     : "Handwriting checking is off, so the page shows the word and he marks it right or not yet. To turn it on, deploy the api folder with this page and add GEMINI_API_KEY in your Vercel project settings.";
+  $("pwBox").hidden = !shared.storage;
+  $("storeStatus").textContent = !shared.checked ? ""
+    : !shared.storage ? "Shared saving is off, so lists stay on the device you type them on. To turn it on, connect a Blob store to this project in Vercel (Storage tab) and redeploy."
+    : !shared.password ? "Shared saving is almost ready. Add a PARENT_PASSWORD environment variable in Vercel and redeploy."
+    : "Shared saving is on. A saved list shows on every device.";
   let v = "";
   if (aiReady()) {
     const keys = new Set(await clipKeys());
@@ -778,21 +790,24 @@ function collectRows() {
   for (const r of rows) { const w = cleanWord(r.w); if (!w || seen.has(norm(w))) continue; seen.add(norm(w)); words.push({ w, s: r.s.trim().slice(0, 160) }); }
   return words;
 }
-function onSave() {
+async function onSave() {
   const words = collectRows();
   rows = words.map((x) => ({ w: x.w, s: x.s })); renderRows();
-  saveList(words);
   const st = $("saveStatus");
-  st.className = "ok"; st.textContent = "Saved " + words.length + " words on this device.";
-  renderHome(false); renderStatus();
-}
-async function onLink() {
-  const words = collectRows();
-  if (!words.length) { $("toolStatus").textContent = "Add some words first."; return; }
-  const url = location.origin + location.pathname + "#list=" + b64u.enc(JSON.stringify(words.map((x) => [x.w, x.s])));
-  $("linkOut").value = url; $("linkOut").hidden = $("linkLabel").hidden = false;
-  $("linkOut").focus(); $("linkOut").select();
-  try { await navigator.clipboard.writeText(url); } catch {}
+  const local = () => { applyList(words); lsSet(LS_LIST, { words }); recordVoices(); renderHome(); renderStatus(); };
+  if (!shared.storage) { local(); st.className = "ok"; st.textContent = "Saved " + words.length + " words on this device only. See Setup status below."; return; }
+  if (!shared.password) { st.className = "bad"; st.textContent = "Not saved. Add PARENT_PASSWORD in Vercel first (see Setup status below)."; return; }
+  const pw = $("pw").value;
+  if (!pw) { st.className = "bad"; st.textContent = "Type the parent password, then tap Save list."; $("pw").focus(); return; }
+  st.className = ""; st.textContent = "Saving…"; $("saveBtn").disabled = true;
+  try {
+    const r = await fetch("/api/words", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pw, words }) });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) { lsSet(LS_PW, pw); local(); st.className = "ok"; st.textContent = "Saved " + words.length + " words. Every device will show this list."; }
+    else if (r.status === 401) { st.className = "bad"; st.textContent = "Not saved. That password is not right."; }
+    else { st.className = "bad"; st.textContent = "Not saved. The site could not store the list" + (j.error ? " (" + j.error + ")" : "") + ". Your words are still here; try again."; }
+  } catch { st.className = "bad"; st.textContent = "Not saved. Check the internet connection and try again."; }
+  $("saveBtn").disabled = false;
 }
 
 /* ---------- wiring ---------- */
@@ -802,7 +817,7 @@ $("gateBack").onclick = () => show("home");
 const tryGate = () => { if (Number($("gateAnswer").value) === gateSum) openParent(); else $("gateMsg").textContent = "That is not it. Try again."; };
 $("gateGo").onclick = tryGate;
 $("gateAnswer").addEventListener("keydown", (e) => { if (e.key === "Enter") tryGate(); });
-$("quitBtn").onclick = () => { stopSpeech(); show("home"); renderHome(false); };
+$("quitBtn").onclick = () => { stopSpeech(); show("home"); renderHome(); };
 $("hearBtn").onclick = sayWord;
 $("sentBtn").onclick = () => { const it = cur(); if (it) say(it.w, it.s, it.w); };
 $("peekBtn").onclick = () => { const it = cur(); if (it) setMsg("This device cannot read aloud. The word is: " + it.w, ""); };
@@ -813,10 +828,10 @@ $("yesBtn").onclick = () => onSelf(true);
 $("noBtn").onclick = () => onSelf(false);
 $("overrideBtn").onclick = onOverride;
 $("nextBtn").onclick = next;
-$("homeBtn").onclick = () => { show("home"); renderHome(false); };
+$("homeBtn").onclick = () => { show("home"); renderHome(); };
 $("againBtn").onclick = () => startRound(S.words);
 $("missedBtn").onclick = () => startRound(S.words.filter((x) => S.results[x.w] && S.results[x.w] !== "right"));
-$("parentBack").onclick = () => { show("home"); renderHome(false); };
+$("parentBack").onclick = () => { show("home"); renderHome(); };
 $("bulkAdd").onclick = () => {
   const n = addWords($("bulk").value.split(/[\n,;]+/));
   $("toolStatus").textContent = n ? "Added " + n + " words. Tap Save list when you are done." : "No new words to add.";
@@ -827,7 +842,6 @@ $("sentencesBtn").onclick = onSentences;
 $("clearAll").onclick = () => { rows = []; renderRows(); $("toolStatus").textContent = "All words removed. Tap Save list to keep this change."; };
 $("clearScores").onclick = () => { progress = {}; lsSet(LS_PROG, progress); renderRows(); $("toolStatus").textContent = "Counts reset."; };
 $("saveBtn").onclick = onSave;
-$("linkBtn").onclick = onLink;
 $("rows").addEventListener("input", (e) => { const t = e.target; if (t.dataset && t.dataset.f && rows[t.dataset.i]) rows[t.dataset.i][t.dataset.f] = t.value; });
 $("rows").addEventListener("click", (e) => { const b = e.target.closest("[data-rm]"); if (!b) return; rows.splice(Number(b.dataset.rm), 1); renderRows(); });
 
