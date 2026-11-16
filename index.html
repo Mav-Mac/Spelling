@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spelling Pad</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Andika:wght@400;700&family=Grandstander:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: one world, a sheet of primary-school ruled paper on a desk.
+   The ruled writing pad is the loud element; everything around it stays quiet. */
+:root {
+  color-scheme: light;
+  --desk: #dbe8f1;
+  --paper: #ffffff;
+  --ink: #1c2742;
+  --ink-soft: #55607a;
+  --pencil: #f7b90f;
+  --pencil-deep: #c98f00;
+  --rule-blue: #62aede;
+  --rule-red: #e5536a;
+  --eraser: #f6c3cd;
+  --good: #23875a;
+  --good-bg: #dff3e8;
+  --try-bg: #fde9c9;
+  --font-display: "Grandstander", "Trebuchet MS", "Comic Sans MS", system-ui, sans-serif;
+  --font-letters: "Andika", "Comic Sans MS", "Century Gothic", system-ui, sans-serif;
+  --radius: 18px;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--desk);
+  color: var(--ink);
+  font-family: var(--font-letters);
+  font-size: 18px;
+  line-height: 1.45;
+  -webkit-tap-highlight-color: transparent;
+}
+[hidden] { display: none !important; }
+h1, h2 { font-family: var(--font-display); font-weight: 800; margin: 0; text-wrap: balance; line-height: 1.1; }
+p { margin: 0; }
+main { height: 100%; }
+section.screen { height: 100%; overflow-y: auto; padding: 20px max(16px, 4vw); }
+
+button {
+  font: inherit; font-family: var(--font-display); font-weight: 700;
+  color: var(--ink); background: var(--paper);
+  border: 2px solid var(--ink); border-radius: var(--radius);
+  min-height: 56px; padding: 8px 20px; cursor: pointer;
+  box-shadow: 0 4px 0 var(--ink);
+  touch-action: manipulation; user-select: none; -webkit-user-select: none;
+}
+button:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 1px 0 var(--ink); }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 4px solid var(--rule-blue); outline-offset: 3px; }
+button.primary { background: var(--pencil); font-size: 1.5rem; min-height: 68px; padding: 8px 34px; }
+button.go { background: var(--good); color: #fff; font-size: 1.5rem; min-height: 68px; padding: 8px 34px; }
+button.erase { background: var(--eraser); }
+button.plain { border-color: transparent; box-shadow: none; background: transparent; color: var(--ink-soft); text-decoration: underline; min-height: 48px; font-weight: 500; }
+button.plain:active:not(:disabled) { transform: none; box-shadow: none; }
+
+/* Ruled paper: top line, dashed midline, red baseline */
+.ruled { position: relative; background: var(--paper); border-radius: var(--radius); border: 2px solid var(--ink); overflow: hidden; }
+.ruled::before, .ruled::after, .ruled > .mid { content: ""; position: absolute; left: 0; right: 0; pointer-events: none; }
+.ruled::before { top: 22%; border-top: 3px solid var(--rule-blue); }
+.ruled > .mid { top: 50%; border-top: 3px dashed var(--rule-blue); opacity: .75; }
+.ruled::after { top: 78%; border-top: 3px solid var(--rule-red); }
+
+/* Home */
+#home { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; text-align: center; }
+.title-sheet { width: min(620px, 100%); height: clamp(130px, 26vh, 200px); display: grid; place-items: center; box-shadow: 0 8px 0 rgba(28, 39, 66, .18); }
+.title-sheet h1 { font-family: var(--font-letters); font-weight: 700; font-size: clamp(2.6rem, 9vw, 4.6rem); letter-spacing: .04em; position: relative; z-index: 1; }
+#homeCount { font-family: var(--font-display); font-weight: 700; font-size: 1.35rem; }
+.note { color: var(--ink-soft); max-width: 46ch; }
+#startBtn { font-size: 2rem; min-height: 84px; padding: 10px 56px; }
+
+/* Play */
+#play { display: flex; flex-direction: column; gap: 12px; overflow: hidden; padding-top: 12px; padding-bottom: 14px; }
+.bar { display: flex; align-items: center; gap: 12px; }
+#quitBtn { min-height: 48px; width: 48px; padding: 0; flex: none; display: grid; place-items: center; }
+#stars { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; flex: 1; }
+#stars svg { width: 28px; height: 28px; display: block; fill: none; stroke: var(--ink-soft); stroke-width: 1.6; stroke-linejoin: round; }
+#stars li.right svg { fill: var(--pencil); stroke: var(--pencil-deep); }
+#stars li.missed svg { fill: #cfe4f3; stroke: var(--rule-blue); }
+#stars li.now svg { stroke: var(--ink); stroke-width: 2.4; }
+#stars li.pop { animation: pop .5s ease-out; }
+@keyframes pop { 0% { transform: scale(.4); } 60% { transform: scale(1.5) rotate(12deg); } 100% { transform: scale(1); } }
+#count { font-family: var(--font-display); font-weight: 700; white-space: nowrap; }
+
+.listen { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+#hearBtn { background: var(--ink); color: #fff; font-size: 1.4rem; min-height: 68px; display: inline-flex; align-items: center; gap: 12px; box-shadow: 0 4px 0 #0b1226; }
+#hearBtn svg { width: 34px; height: 34px; fill: currentColor; }
+#msg { font-family: var(--font-display); font-weight: 700; font-size: 1.25rem; padding: 10px 16px; border-radius: 14px; background: var(--paper); min-height: 52px; display: flex; align-items: center; }
+#msg.good { background: var(--good-bg); color: var(--good); }
+#msg.try { background: var(--try-bg); }
+
+.model { --mh: clamp(96px, 17vh, 150px); height: var(--mh); flex: none; }
+/* the word sits on the red baseline, like a teacher's model on ruled paper */
+#modelWord { position: absolute; left: 0; right: 0; bottom: 22%; transform: translateY(.21em); z-index: 1; text-align: center; white-space: nowrap; font-family: var(--font-letters); font-weight: 400; font-size: min(calc(var(--mh) * .7), 10vw); letter-spacing: .1em; line-height: 1; }
+
+.pad { flex: 1; min-height: 190px; }
+#pad { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; z-index: 1; }
+.pad.locked #pad { pointer-events: none; }
+#padHint { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); text-align: center; color: var(--ink-soft); opacity: .45; font-size: 1.5rem; pointer-events: none; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.actions .spacer { flex: 1; }
+
+/* Done */
+#done { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; text-align: center; }
+#done h2 { font-size: clamp(2.2rem, 7vw, 3.4rem); }
+#doneStars { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: 520px; }
+#doneStars svg { width: 44px; height: 44px; fill: var(--pencil); stroke: var(--pencil-deep); stroke-width: 1.4; stroke-linejoin: round; }
+#doneStars svg.missed { fill: #cfe4f3; stroke: var(--rule-blue); }
+#doneScore { font-family: var(--font-display); font-weight: 700; font-size: 1.5rem; }
+#missedBox { background: var(--paper); border-radius: var(--radius); padding: 14px 22px; max-width: 560px; }
+#missedWords { font-size: 1.8rem; letter-spacing: .06em; }
+.row { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
+
+/* Gate + parent */
+#gate { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; text-align: center; }
+#parent { max-width: 780px; margin: 0 auto; display: block; }
+#parent > * + * { margin-top: 18px; }
+.card { background: var(--paper); border-radius: var(--radius); padding: 18px; }
+.card > * + * { margin-top: 12px; }
+.card h2 { font-size: 1.3rem; }
+label { font-family: var(--font-display); font-weight: 700; display: block; }
+input[type="text"], input[type="number"], textarea {
+  font: inherit; color: var(--ink); background: #fff; border: 2px solid var(--ink-soft); border-radius: 12px; padding: 10px 12px; width: 100%; min-height: 48px;
+}
+textarea { min-height: 110px; resize: vertical; }
+#gateAnswer { width: 140px; text-align: center; font-size: 1.5rem; }
+.wrow { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(0, 2.2fr) 48px; gap: 8px; align-items: start; }
+.wrow button { min-height: 48px; padding: 0; box-shadow: none; border-color: var(--ink-soft); }
+.wrow small { grid-column: 1 / -1; color: var(--ink-soft); margin-top: -4px; }
+#rows { display: grid; gap: 10px; }
+#rowsEmpty { color: var(--ink-soft); }
+.tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.tools button { min-height: 48px; box-shadow: 0 3px 0 var(--ink); }
+#saveStatus, #aiStatus, #toolStatus { color: var(--ink-soft); }
+#saveStatus.ok { color: var(--good); font-weight: 700; }
+.file { position: absolute; width: 1px; height: 1px; opacity: 0; }
+@media (max-width: 520px) {
+  .wrow { grid-template-columns: 1fr 48px; }
+  .wrow .sent { grid-column: 1 / -1; grid-row: 2; }
+  button.primary, button.go { font-size: 1.25rem; padding: 8px 22px; }
+}
+@media (prefers-reduced-motion: reduce) { #stars li.pop { animation: none; } button:active:not(:disabled) { transform: none; } }
+</style>
+</head>
+<body>
+<main>
+
+<section id="home" class="screen">
+  <div class="title-sheet ruled"><span class="mid"></span><h1>Spelling Pad</h1></div>
+  <p id="homeCount">Getting your words…</p>
+  <p id="exampleNote" class="note" hidden>These are example words. A grown-up can add this week's list.</p>
+  <button id="startBtn" class="primary" disabled>Start</button>
+  <button id="parentBtn" class="plain">Grown-ups</button>
+</section>
+
+<section id="gate" class="screen" hidden>
+  <h2>Grown-ups only</h2>
+  <label for="gateAnswer" id="gateQ">What is 8 + 7?</label>
+  <input id="gateAnswer" type="number" inputmode="numeric" autocomplete="off">
+  <p id="gateMsg" class="note" role="status"></p>
+  <div class="row">
+    <button id="gateBack">Back</button>
+    <button id="gateGo" class="primary">Open</button>
+  </div>
+</section>
+
+<section id="play" class="screen" hidden>
+  <div class="bar">
+    <button id="quitBtn" aria-label="Stop and go home">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+    </button>
+    <ol id="stars" aria-label="Stars"></ol>
+    <span id="count"></span>
+  </div>
+  <div class="listen">
+    <button id="hearBtn">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 4V5L7 9H3z"/><path d="M15.5 8.5a5 5 0 010 7M18 6a8.5 8.5 0 010 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>Hear the word</span>
+    </button>
+    <button id="sentBtn">In a sentence</button>
+    <button id="peekBtn" class="plain" hidden>Grown-up: show the word</button>
+  </div>
+  <div id="model" class="model ruled" hidden><span class="mid"></span><span id="modelWord"></span></div>
+  <p id="msg" role="status" aria-live="polite"></p>
+  <div id="padWrap" class="pad ruled">
+    <span class="mid"></span>
+    <span id="padHint">Write the word here</span>
+    <canvas id="pad" aria-label="Writing pad"></canvas>
+  </div>
+  <div class="actions">
+    <button id="clearBtn" class="erase">Erase</button>
+    <button id="undoBtn">Undo</button>
+    <span class="spacer"></span>
+    <button id="overrideBtn" class="plain" hidden>Grown-up: it was right</button>
+    <button id="noBtn" hidden>Not yet</button>
+    <button id="yesBtn" class="go" hidden>I got it</button>
+    <button id="checkBtn" class="primary">Check</button>
+    <button id="nextBtn" class="go" hidden>Next word</button>
+  </div>
+</section>
+
+<section id="done" class="screen" hidden>
+  <h2>All done!</h2>
+  <div id="doneStars"></div>
+  <p id="doneScore"></p>
+  <div id="missedBox" hidden>
+    <p class="note">Words to practice again</p>
+    <p id="missedWords"></p>
+  </div>
+  <div class="row">
+    <button id="homeBtn">Home</button>
+    <button id="missedBtn" hidden>Practice those words</button>
+    <button id="againBtn" class="primary">Go again</button>
+  </div>
+</section>
+
+<section id="parent" class="screen" hidden>
+  <div class="tools" style="justify-content: space-between">
+    <h2>This week's words</h2>
+    <button id="parentBack">Back to home</button>
+  </div>
+
+  <div class="card">
+    <h2>Add words</h2>
+    <label for="bulk">Type or paste words, one per line or separated by commas</label>
+    <textarea id="bulk" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="jump&#10;went&#10;said"></textarea>
+    <div class="tools">
+      <button id="bulkAdd">Add these words</button>
+      <label id="photoLabel" for="photo" hidden><span class="plain" style="text-decoration: underline; cursor: pointer">Or read words from a photo of the list</span></label>
+      <input id="photo" class="file" type="file" accept="image/*">
+    </div>
+    <p id="toolStatus" role="status"></p>
+  </div>
+
+  <div class="card">
+    <h2>Word list</h2>
+    <p class="note">The sentence is read aloud when he taps In a sentence. It helps with words that sound alike.</p>
+    <div id="rows"></div>
+    <p id="rowsEmpty" hidden>No words yet. Add some above.</p>
+    <div class="tools">
+      <button id="sentencesBtn" hidden>Write sentences for me</button>
+      <button id="clearAll" class="plain">Remove all words</button>
+      <button id="clearScores" class="plain">Reset right and missed counts</button>
+    </div>
+    <div class="tools">
+      <button id="saveBtn" class="primary">Save list</button>
+      <p id="saveStatus" role="status"></p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Use this list on another device</h2>
+    <p class="note">Lists are saved on the device you type them on. To move a saved list to his tablet, open this link there.</p>
+    <div class="tools">
+      <button id="linkBtn">Make a link for this list</button>
+    </div>
+    <label for="linkOut" id="linkLabel" hidden>Link (copied if your browser allows it)</label>
+    <input id="linkOut" type="text" readonly hidden>
+  </div>
+
+  <div class="card">
+    <h2>Setup status</h2>
+    <p id="aiStatus"></p>
+    <p id="voiceStatus"></p>
+  </div>
+</section>
+
+</main>
+<script>
+(() => {
+"use strict";
+const $ = (id) => document.getElementById(id);
+const STAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.95 6 6.6.95-4.78 4.65 1.13 6.57L12 17.56l-5.9 3.11 1.13-6.57L2.45 9.45l6.6-.95z"/></svg>';
+const EXAMPLES = [
+  { w: "cat", s: "The cat sat on my lap." }, { w: "sun", s: "The sun is hot today." },
+  { w: "hop", s: "A frog can hop." }, { w: "red", s: "My wagon is red." },
+  { w: "big", s: "That is a big dog." }, { w: "map", s: "We read the map." },
+];
+/* Everything the page says besides the words. Fixed, so each is recorded once. */
+const P = {
+  yes: "Yes! You spelled it.",
+  copied: "Good copying!",
+  miss: "Not quite. Look at the word, and copy it on the lines.",
+  again: "Look at each letter and try again.",
+  unread: "I could not read that. Write it again, nice and big.",
+  first: "Write the word first.",
+  self: "Look at the word. Did you spell it the same?",
+  copy: "Copy the word on the lines.",
+  done: "All done! Great work.",
+};
+const LS_LIST = "spellingpad.list", LS_PROG = "spellingpad.progress";
+const lsGet = (k) => { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+const norm = (t) => String(t || "").toLowerCase().replace(/[‘’]/g, "'").replace(/[^a-z'\-]/g, "");
+const cleanWord = (t) => String(t || "").trim().replace(/[‘’]/g, "'").replace(/[^A-Za-z'\- ]/g, "").replace(/\s+/g, " ").slice(0, 40);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* ---------- the helper on your Vercel site: /api/ai ---------- */
+let serverOk = false, serverChecked = false;
+async function api(task, body) {
+  const r = await fetch("/api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.assign({ task }, body)) });
+  let j = null;
+  try { j = await r.json(); } catch {}
+  if (!r.ok) throw { status: r.status, retry: j && j.retryAfter, message: j && j.error };
+  return j || {};
+}
+const serverReady = fetch("/api/ai").then((r) => (r.ok ? r.json() : null)).then((j) => { serverOk = !!(j && j.ok && j.key); })
+  .catch(() => {}).then(() => { serverChecked = true; renderStatus(); recordVoices(); });
+const aiReady = () => serverOk;
+
+/* ---------- voice clips: made once by Gemini, kept on this device ---------- */
+let idb = null;
+const idbReady = new Promise((res) => {
+  try {
+    const q = indexedDB.open("spellingpad", 1);
+    q.onupgradeneeded = () => q.result.createObjectStore("clips");
+    q.onsuccess = () => { idb = q.result; res(); };
+    q.onerror = () => res();
+  } catch { res(); }
+});
+const store = (mode) => idb.transaction("clips", mode).objectStore("clips");
+const wrap = (rq) => new Promise((res) => { rq.onsuccess = () => res(rq.result); rq.onerror = () => res(null); });
+async function clipGet(k) { await idbReady; return idb ? wrap(store("readonly").get(k)) : null; }
+async function clipPut(k, v) { await idbReady; if (idb) await wrap(store("readwrite").put(v, k)); }
+async function clipKeys() { await idbReady; return idb ? ((await wrap(store("readonly").getAllKeys())) || []) : []; }
+
+let actx = null;
+const buffers = new Map();
+const clipKey = (text) => String(text).trim().toLowerCase();
+async function loadBuffer(text) {
+  const k = clipKey(text);
+  if (buffers.has(k)) return buffers.get(k);
+  if (!actx) return null;
+  const ab = await clipGet(k);
+  if (!ab) return null;
+  try { const buf = await actx.decodeAudioData(ab.slice(0)); buffers.set(k, buf); return buf; } catch { return null; }
+}
+function b64ToBuf(b64) { const s = atob(b64), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u.buffer; }
+
+/* Recording queue: one request at a time, waits when Gemini says slow down, gives up after repeated failures. */
+const queue = [];
+let pumping = false, voiceOff = false, hardFails = 0, waits = 0;
+function want(text, front) {
+  if (!serverOk || voiceOff || !text) return;
+  const k = clipKey(text);
+  if (buffers.has(k) || queue.some((q) => clipKey(q) === k)) return;
+  if (front) queue.unshift(text); else queue.push(text);
+  pump();
+}
+async function pump() {
+  if (pumping) return;
+  pumping = true;
+  while (queue.length && !voiceOff) {
+    const t = queue[0];
+    if (await clipGet(clipKey(t))) { queue.shift(); continue; }
+    try {
+      const j = await api("speak", { text: t });
+      await clipPut(clipKey(t), b64ToBuf(j.audio));
+      queue.shift(); hardFails = 0; renderStatus();
+    } catch (e) {
+      if (e && e.status === 429 && waits < 40) { waits++; await sleep(Math.min(60, Math.max(5, Number(e.retry) || 21)) * 1000); }
+      else { queue.shift(); hardFails++; if (hardFails >= 3 || (e && e.status === 429)) { voiceOff = true; queue.length = 0; renderStatus(); } }
+    }
+  }
+  pumping = false;
+}
+function recordVoices(firstWords) {
+  if (!serverOk) return;
+  for (const x of (firstWords || [])) want(x.w, true);
+  if (!usingExamples) for (const x of list) want(x.w);
+  for (const k of Object.keys(P)) want(P[k]);
+  if (!usingExamples) for (const x of list) if (x.s) want(x.s);
+}
+
+/* ---------- speaking ---------- */
+const synth = "speechSynthesis" in window ? window.speechSynthesis : null;
+let deviceVoice = null, unlocked = false, playing = null, sayToken = 0;
+function pickVoice() {
+  if (!synth) return;
+  const vs = synth.getVoices().filter((v) => /^en/i.test(v.lang));
+  const score = (v) => (/natural|neural|premium|enhanced/i.test(v.name) ? 8 : 0) + (/siri/i.test(v.name) ? 6 : 0)
+    + (/samantha|ava|allison|jenny|aria|google us english/i.test(v.name) ? 4 : 0) + (/en[-_]US/i.test(v.lang) ? 2 : 0);
+  deviceVoice = vs.sort((a, b) => score(b) - score(a))[0] || null;
+}
+if (synth) { pickVoice(); try { synth.addEventListener("voiceschanged", pickVoice); } catch {} }
+const canSpeak = () => !!(synth || actx);
+function unlockAudio() {
+  try { if (!actx) { const C = window.AudioContext || window.webkitAudioContext; if (C) actx = new C(); } if (actx && actx.state === "suspended") actx.resume(); } catch {}
+  if (!unlocked && synth) { unlocked = true; try { synth.speak(new SpeechSynthesisUtterance(" ")); } catch {} }
+}
+function stopSpeech() {
+  sayToken++;
+  if (playing) { try { playing.stop(); } catch {} playing = null; }
+  if (synth) try { synth.cancel(); } catch {}
+}
+function playBuf(buf) {
+  return new Promise((res) => {
+    const src = actx.createBufferSource();
+    src.buffer = buf; src.connect(actx.destination); src.onended = res;
+    playing = src; src.start();
+  });
+}
+function deviceSay(text) {
+  if (!synth) return;
+  try {
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 0.82; u.pitch = 1.05; u.lang = "en-US";
+    if (deviceVoice) u.voice = deviceVoice;
+    synth.speak(u);
+  } catch {}
+}
+/* say("cat") or say("cat", "The cat sat.", "cat"): recorded voice when every part is ready, device voice until then. */
+async function say(...texts) {
+  unlockAudio();           // must run inside the tap
+  stopSpeech();
+  const my = sayToken;
+  const bufs = [];
+  for (const t of texts) { const b = await loadBuffer(t); if (!b) want(t, true); bufs.push(b); }
+  if (my !== sayToken) return;
+  if (actx && bufs.every(Boolean)) {
+    try { if (actx.state !== "running") await actx.resume(); } catch {}
+    if (actx.state === "running") {
+      for (const b of bufs) { if (my !== sayToken) return; await playBuf(b); await sleep(280); }
+      return;
+    }
+  }
+  deviceSay(texts.join(". "));
+}
+
+/* ---------- data (saved on this device) ---------- */
+let list = [], usingExamples = true, progress = {};
+function applyList(words) {
+  const ok = Array.isArray(words) ? words.map((x) => ({ w: cleanWord(x && x.w), s: String((x && x.s) || "").slice(0, 160) })).filter((x) => x.w) : [];
+  usingExamples = ok.length === 0;
+  list = usingExamples ? EXAMPLES.slice() : ok;
+}
+function saveList(words) { applyList(words); lsSet(LS_LIST, { words }); recordVoices(); }
+const b64u = {
+  enc: (s) => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""),
+  dec: (s) => decodeURIComponent(escape(atob(s.replace(/-/g, "+").replace(/_/g, "/")))),
+};
+function loadData() {
+  let fromLink = false;
+  const m = /^#list=([\w-]+)$/.exec(location.hash);
+  if (m) {
+    try {
+      const arr = JSON.parse(b64u.dec(m[1]));
+      const words = arr.map((p) => ({ w: cleanWord(p[0]), s: String(p[1] || "") })).filter((x) => x.w);
+      if (words.length) { saveList(words); fromLink = true; }
+    } catch {}
+    try { history.replaceState(null, "", location.pathname); } catch {}
+  }
+  if (!fromLink) { const c = lsGet(LS_LIST); applyList(c && c.words); }
+  progress = lsGet(LS_PROG) || {};
+  renderHome(fromLink);
+}
+
+/* ---------- screens ---------- */
+const SCREENS = ["home", "gate", "play", "done", "parent"];
+let S = { screen: "home", words: [], queue: [], idx: 0, phase: "write", results: {}, read: "", viaAi: false, msg: "", kind: "" };
+const cur = () => S.queue[S.idx];
+function show(name) { for (const s of SCREENS) $(s).hidden = s !== name; S.screen = name; }
+function renderHome(fromLink) {
+  const n = list.length;
+  $("homeCount").textContent = n + (n === 1 ? " word" : " words") + " ready";
+  const note = $("exampleNote");
+  note.hidden = !(usingExamples || fromLink);
+  note.textContent = fromLink ? "New word list loaded from your link." : "These are example words. A grown-up can add this week's list.";
+  $("startBtn").disabled = n === 0;
+}
+
+/* ---------- a round ---------- */
+function startRound(words) {
+  if (!words.length) return;
+  unlockAudio();
+  S = { screen: "play", words: words.map((x) => ({ w: x.w, s: x.s })), queue: words.map((x) => ({ w: x.w, s: x.s, retry: false })), idx: 0, phase: "write", results: {}, read: "", viaAi: false, msg: "", kind: "" };
+  strokes = [];
+  show("play"); renderPlay(); sizePad();
+  recordVoices(S.words.slice().reverse());
+  sayWord();
+}
+function sayWord() { const it = cur(); if (it) say(it.w); }
+function setMsg(text, kind) { S.msg = text; S.kind = kind || ""; const m = $("msg"); m.textContent = text; m.className = kind || ""; }
+function renderStars(popWord) {
+  const ol = $("stars");
+  ol.innerHTML = "";
+  const now = cur();
+  for (const x of S.words) {
+    const li = document.createElement("li");
+    const r = S.results[x.w];
+    if (r === "right") li.className = "right"; else if (r) li.className = "missed";
+    if (now && now.w === x.w && S.phase !== "right") li.classList.add("now");
+    if (popWord === x.w) li.classList.add("pop");
+    li.innerHTML = STAR;
+    ol.appendChild(li);
+  }
+}
+function renderPlay(popWord) {
+  const it = cur();
+  if (!it) return;
+  renderStars(popWord);
+  const n = S.words.findIndex((x) => x.w === it.w) + 1;
+  $("count").textContent = it.retry ? "One more try" : "Word " + n + " of " + S.words.length;
+  const ph = S.phase;
+  $("sentBtn").hidden = !it.s;
+  $("peekBtn").hidden = canSpeak();
+  const showModel = ph === "copy" || ph === "self" || ph === "right";
+  $("model").hidden = !showModel;
+  $("modelWord").textContent = showModel ? it.w : "";
+  $("padWrap").classList.toggle("locked", ph === "busy" || ph === "right" || ph === "self");
+  $("padHint").textContent = ph === "copy" ? "Copy the word here" : "Write the word here";
+  $("padHint").hidden = strokes.length > 0;
+  const editing = ph === "write" || ph === "copy";
+  $("clearBtn").hidden = !editing && ph !== "busy";
+  $("undoBtn").hidden = !editing && ph !== "busy";
+  $("clearBtn").disabled = $("undoBtn").disabled = ph === "busy";
+  $("checkBtn").hidden = !(ph === "write" || ph === "busy" || (ph === "copy" && aiReady()));
+  $("checkBtn").disabled = ph === "busy";
+  $("checkBtn").textContent = ph === "busy" ? "Reading…" : "Check";
+  $("yesBtn").hidden = $("noBtn").hidden = ph !== "self";
+  $("nextBtn").hidden = !(ph === "right" || ph === "copy");
+  $("nextBtn").textContent = S.idx >= S.queue.length - 1 ? "Finish" : "Next word";
+  $("overrideBtn").hidden = !(ph === "copy" && S.viaAi && !it.retry && S.results[it.w] !== "right");
+  $("msg").textContent = S.msg; $("msg").className = S.kind;
+}
+function markRight(it) { S.results[it.w] = it.retry ? "fixed" : "right"; }
+function markMiss(it) {
+  if (it.retry) return;
+  S.results[it.w] = "missed";
+  S.queue.push({ w: it.w, s: it.s, retry: true });
+}
+function selfCheck() {
+  S.phase = "self"; S.viaAi = false;
+  setMsg(P.self, ""); renderPlay(); say(P.self);
+}
+async function onCheck() {
+  const it = cur();
+  if (!it || S.phase === "busy") return;
+  if (!strokes.length) { setMsg(P.first, "try"); say(P.first); return; }
+  const from = S.phase;
+  if (!aiReady()) { selfCheck(); return; }
+  unlockAudio();
+  S.phase = "busy"; setMsg("Reading your writing…", ""); renderPlay();
+  let r;
+  try { r = await api("read", { image: inkData() }); }
+  catch (e) {
+    if (e && e.status === 429) { S.phase = from; setMsg("The checker is busy. Wait a moment, then tap Check again.", "try"); renderPlay(); }
+    else selfCheck();
+    return;
+  }
+  const reads = [norm(r.read)];
+  if (Array.isArray(r.also)) for (const a of r.also.slice(0, 4)) reads.push(norm(a));
+  const seen = reads.filter(Boolean);
+  if (!seen.length || r.blank === true) {
+    S.phase = from; strokes = []; drawPad();
+    setMsg(P.unread, "try"); renderPlay(); say(P.unread);
+    return;
+  }
+  S.viaAi = true; S.read = seen[0];
+  if (seen.includes(norm(it.w))) {
+    if (from === "write") markRight(it);
+    S.phase = "right";
+    setMsg(from === "write" ? P.yes : P.copied, "good");
+    renderPlay(from === "write" && !it.retry ? it.w : null);
+    say(from === "write" ? P.yes : P.copied);
+  } else if (from === "write") {
+    markMiss(it);
+    S.phase = "copy"; strokes = []; drawPad();
+    setMsg("Not quite. I read “" + S.read + "”. Copy the word on the lines.", "try");
+    renderPlay(); say(P.miss);
+  } else {
+    S.phase = "copy"; strokes = []; drawPad();
+    setMsg("Look at each letter and try again. I read “" + S.read + "”.", "try");
+    renderPlay(); say(P.again);
+  }
+}
+function onSelf(yes) {
+  const it = cur();
+  if (!it) return;
+  if (yes) { markRight(it); next(); return; }
+  markMiss(it);
+  S.phase = "copy"; strokes = []; drawPad();
+  setMsg(P.copy, "try"); renderPlay(); say(P.copy);
+}
+function onOverride() {
+  const it = cur();
+  if (!it) return;
+  S.results[it.w] = "right";
+  for (let i = S.queue.length - 1; i > S.idx; i--) if (S.queue[i].retry && S.queue[i].w === it.w) { S.queue.splice(i, 1); break; }
+  S.phase = "right"; setMsg("Counted as right.", "good"); renderPlay(it.w);
+}
+function next() {
+  S.idx += 1; strokes = []; S.read = ""; S.viaAi = false;
+  if (S.idx >= S.queue.length) { finish(); return; }
+  S.phase = "write"; setMsg("", ""); drawPad(); renderPlay(); sayWord();
+}
+function finish() {
+  for (const x of S.words) {
+    const p = progress[x.w] || { right: 0, wrong: 0 };
+    if (S.results[x.w] === "right") p.right += 1; else if (S.results[x.w]) p.wrong += 1;
+    progress[x.w] = p;
+  }
+  lsSet(LS_PROG, progress);
+  show("done"); renderDone(); say(P.done);
+}
+function renderDone() {
+  const right = S.words.filter((x) => S.results[x.w] === "right");
+  const missed = S.words.filter((x) => S.results[x.w] && S.results[x.w] !== "right");
+  $("doneStars").innerHTML = S.words.map((x) => S.results[x.w] === "right" ? STAR : STAR.replace("<svg ", '<svg class="missed" ')).join("");
+  $("doneScore").textContent = right.length + " of " + S.words.length + " right the first time";
+  $("missedBox").hidden = missed.length === 0;
+  $("missedWords").textContent = missed.map((x) => x.w).join("   ");
+  $("missedBtn").hidden = missed.length === 0;
+}
+
+/* ---------- writing pad ---------- */
+const pad = $("pad"), ctx = pad.getContext("2d");
+let strokes = [], active = null, activeId = null, dirty = false;
+function sizePad() {
+  const r = pad.getBoundingClientRect();
+  if (!r.width || !r.height) return;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  pad.width = Math.round(r.width * dpr); pad.height = Math.round(r.height * dpr);
+  drawPad();
+}
+function paint(c, w, h, color) {
+  c.strokeStyle = color; c.fillStyle = color; c.lineCap = "round"; c.lineJoin = "round";
+  c.lineWidth = Math.max(3, h * 0.03);
+  for (const s of strokes) {
+    if (!s.length) continue;
+    if (s.length === 1) { c.beginPath(); c.arc(s[0].x * w, s[0].y * h, c.lineWidth / 2, 0, Math.PI * 2); c.fill(); continue; }
+    c.beginPath(); c.moveTo(s[0].x * w, s[0].y * h);
+    for (let i = 1; i < s.length - 1; i++) c.quadraticCurveTo(s[i].x * w, s[i].y * h, (s[i].x + s[i + 1].x) / 2 * w, (s[i].y + s[i + 1].y) / 2 * h);
+    const l = s[s.length - 1];
+    c.lineTo(l.x * w, l.y * h); c.stroke();
+  }
+}
+function drawPad() { ctx.clearRect(0, 0, pad.width, pad.height); paint(ctx, pad.width, pad.height, "#1c2742"); $("padHint").hidden = strokes.length > 0; }
+function schedule() { if (dirty) return; dirty = true; requestAnimationFrame(() => { dirty = false; drawPad(); }); }
+function pt(e) { const r = pad.getBoundingClientRect(); return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) }; }
+pad.addEventListener("pointerdown", (e) => {
+  if (activeId !== null || !(S.phase === "write" || S.phase === "copy")) return;
+  e.preventDefault();
+  activeId = e.pointerId; active = [pt(e)]; strokes.push(active);
+  try { pad.setPointerCapture(e.pointerId); } catch {}
+  schedule();
+});
+pad.addEventListener("pointermove", (e) => {
+  if (e.pointerId !== activeId || !active) return;
+  e.preventDefault();
+  const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
+  if (evs && evs.length) for (const c of evs) active.push(pt(c)); else active.push(pt(e));
+  schedule();
+});
+const endStroke = (e) => { if (e.pointerId !== activeId) return; activeId = null; active = null; schedule(); };
+pad.addEventListener("pointerup", endStroke);
+pad.addEventListener("pointercancel", endStroke);
+if ("ResizeObserver" in window) new ResizeObserver(sizePad).observe($("padWrap")); else window.addEventListener("resize", sizePad);
+function inkData() {
+  const r = pad.getBoundingClientRect();
+  const w = 1000, h = Math.max(240, Math.round(1000 * (r.height / Math.max(1, r.width))));
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const x = c.getContext("2d");
+  x.fillStyle = "#ffffff"; x.fillRect(0, 0, w, h);
+  paint(x, w, h, "#000000");
+  return c.toDataURL("image/png").split(",")[1];
+}
+
+/* ---------- grown-up area ---------- */
+let rows = [], gateSum = 0;
+function openGate() {
+  const a = 6 + Math.floor(Math.random() * 4), b = 5 + Math.floor(Math.random() * 4);
+  gateSum = a + b;
+  $("gateQ").textContent = "What is " + a + " + " + b + "?";
+  $("gateAnswer").value = ""; $("gateMsg").textContent = "";
+  show("gate");
+}
+function openParent() {
+  rows = usingExamples ? [] : list.map((x) => ({ w: x.w, s: x.s }));
+  $("saveStatus").textContent = ""; $("saveStatus").className = ""; $("toolStatus").textContent = "";
+  $("linkOut").hidden = $("linkLabel").hidden = true;
+  renderRows(); renderStatus(); show("parent");
+}
+function renderRows() {
+  const box = $("rows");
+  box.innerHTML = "";
+  rows.forEach((r, i) => {
+    const d = document.createElement("div"); d.className = "wrow";
+    const w = document.createElement("input"); w.type = "text"; w.id = "word-" + i; w.value = r.w; w.dataset.i = i; w.dataset.f = "w";
+    w.setAttribute("aria-label", "Word " + (i + 1)); w.autocapitalize = "off"; w.autocomplete = "off"; w.spellcheck = false;
+    const s = document.createElement("input"); s.type = "text"; s.id = "sentence-" + i; s.className = "sent"; s.value = r.s; s.dataset.i = i; s.dataset.f = "s";
+    s.setAttribute("aria-label", "Sentence for word " + (i + 1)); s.placeholder = "Sentence (optional)";
+    const x = document.createElement("button"); x.type = "button"; x.id = "remove-" + i; x.dataset.rm = i; x.textContent = "×";
+    x.setAttribute("aria-label", "Remove " + (r.w || "word"));
+    d.append(w, s, x);
+    const p = progress[r.w];
+    if (p && (p.right || p.wrong)) { const sm = document.createElement("small"); sm.textContent = "Right first time: " + (p.right || 0) + "   Missed: " + (p.wrong || 0); d.append(sm); }
+    box.appendChild(d);
+  });
+  $("rowsEmpty").hidden = rows.length > 0;
+  $("sentencesBtn").hidden = !aiReady() || rows.length === 0;
+}
+function addWords(arr) {
+  const have = new Set(rows.map((r) => norm(r.w)));
+  let added = 0;
+  for (const raw of arr) {
+    const w = cleanWord(raw).toLowerCase();
+    if (!w || have.has(norm(w)) || rows.length >= 40) continue;
+    have.add(norm(w)); rows.push({ w, s: "" }); added++;
+  }
+  renderRows();
+  return added;
+}
+async function renderStatus() {
+  if (!$("aiStatus")) return;
+  $("photoLabel").hidden = !aiReady();
+  $("sentencesBtn").hidden = !aiReady() || rows.length === 0;
+  $("aiStatus").textContent = !serverChecked ? "Checking the connection…"
+    : aiReady() ? "Handwriting checking is on. Gemini reads his writing when he taps Check."
+    : "Handwriting checking is off, so the page shows the word and he marks it right or not yet. To turn it on, deploy the api folder with this page and add GEMINI_API_KEY in your Vercel project settings.";
+  let v = "";
+  if (aiReady()) {
+    const keys = new Set(await clipKeys());
+    const have = list.filter((x) => keys.has(clipKey(x.w))).length;
+    v = voiceOff ? "The natural voice could not be recorded right now (" + have + " of " + list.length + " words ready). The device voice fills in. Reload the page later to try again."
+      : have >= list.length ? "Natural voice is ready for all " + list.length + " words on this device."
+      : "Recording the natural voice: " + have + " of " + list.length + " words ready on this device. This can take a few minutes on a free Gemini key. The device voice fills in until then.";
+  } else if (serverChecked) v = "Using this device's built-in voice.";
+  $("voiceStatus").textContent = v;
+}
+function photoData(file) {
+  return new Promise((res, rej) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const k = Math.min(1, 1600 / Math.max(img.width, img.height));
+      const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      res(c.toDataURL("image/jpeg", 0.85).split(",")[1]);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error("image")); };
+    img.src = url;
+  });
+}
+async function onPhoto(file) {
+  if (!file || !aiReady()) return;
+  $("toolStatus").textContent = "Reading the photo…";
+  try {
+    const j = await api("photo", { image: await photoData(file) });
+    const n = addWords(Array.isArray(j.words) ? j.words.map(String) : []);
+    $("toolStatus").textContent = n ? "Added " + n + " words from the photo. Check them, then tap Save list." : "No new words found in that photo. Try a clearer picture or type them in.";
+  } catch { $("toolStatus").textContent = "Could not read that photo. Try again, or type the words in."; }
+}
+async function onSentences() {
+  const need = rows.filter((r) => r.w && !r.s.trim());
+  if (!need.length) { $("toolStatus").textContent = "Every word already has a sentence."; return; }
+  $("sentencesBtn").disabled = true; $("toolStatus").textContent = "Writing sentences…";
+  try {
+    const j = await api("sentences", { words: need.map((r) => r.w) });
+    let n = 0;
+    const out = j.sentences || {};
+    for (const r of need) { const s = out[r.w]; if (typeof s === "string" && s.trim()) { r.s = s.trim().slice(0, 160); n++; } }
+    renderRows();
+    $("toolStatus").textContent = n ? "Added " + n + " sentences. Read them over, then tap Save list." : "No sentences came back. Try again.";
+  } catch { $("toolStatus").textContent = "Could not write sentences right now. You can type them in."; }
+  $("sentencesBtn").disabled = false;
+}
+function collectRows() {
+  const seen = new Set(), words = [];
+  for (const r of rows) { const w = cleanWord(r.w); if (!w || seen.has(norm(w))) continue; seen.add(norm(w)); words.push({ w, s: r.s.trim().slice(0, 160) }); }
+  return words;
+}
+function onSave() {
+  const words = collectRows();
+  rows = words.map((x) => ({ w: x.w, s: x.s })); renderRows();
+  saveList(words);
+  const st = $("saveStatus");
+  st.className = "ok"; st.textContent = "Saved " + words.length + " words on this device.";
+  renderHome(false); renderStatus();
+}
+async function onLink() {
+  const words = collectRows();
+  if (!words.length) { $("toolStatus").textContent = "Add some words first."; return; }
+  const url = location.origin + location.pathname + "#list=" + b64u.enc(JSON.stringify(words.map((x) => [x.w, x.s])));
+  $("linkOut").value = url; $("linkOut").hidden = $("linkLabel").hidden = false;
+  $("linkOut").focus(); $("linkOut").select();
+  try { await navigator.clipboard.writeText(url); } catch {}
+}
+
+/* ---------- wiring ---------- */
+$("startBtn").onclick = () => startRound(list);
+$("parentBtn").onclick = openGate;
+$("gateBack").onclick = () => show("home");
+const tryGate = () => { if (Number($("gateAnswer").value) === gateSum) openParent(); else $("gateMsg").textContent = "That is not it. Try again."; };
+$("gateGo").onclick = tryGate;
+$("gateAnswer").addEventListener("keydown", (e) => { if (e.key === "Enter") tryGate(); });
+$("quitBtn").onclick = () => { stopSpeech(); show("home"); renderHome(false); };
+$("hearBtn").onclick = sayWord;
+$("sentBtn").onclick = () => { const it = cur(); if (it) say(it.w, it.s, it.w); };
+$("peekBtn").onclick = () => { const it = cur(); if (it) setMsg("This device cannot read aloud. The word is: " + it.w, ""); };
+$("clearBtn").onclick = () => { strokes = []; drawPad(); };
+$("undoBtn").onclick = () => { strokes.pop(); drawPad(); };
+$("checkBtn").onclick = onCheck;
+$("yesBtn").onclick = () => onSelf(true);
+$("noBtn").onclick = () => onSelf(false);
+$("overrideBtn").onclick = onOverride;
+$("nextBtn").onclick = next;
+$("homeBtn").onclick = () => { show("home"); renderHome(false); };
+$("againBtn").onclick = () => startRound(S.words);
+$("missedBtn").onclick = () => startRound(S.words.filter((x) => S.results[x.w] && S.results[x.w] !== "right"));
+$("parentBack").onclick = () => { show("home"); renderHome(false); };
+$("bulkAdd").onclick = () => {
+  const n = addWords($("bulk").value.split(/[\n,;]+/));
+  $("toolStatus").textContent = n ? "Added " + n + " words. Tap Save list when you are done." : "No new words to add.";
+  if (n) $("bulk").value = "";
+};
+$("photo").addEventListener("change", (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; onPhoto(f); });
+$("sentencesBtn").onclick = onSentences;
+$("clearAll").onclick = () => { rows = []; renderRows(); $("toolStatus").textContent = "All words removed. Tap Save list to keep this change."; };
+$("clearScores").onclick = () => { progress = {}; lsSet(LS_PROG, progress); renderRows(); $("toolStatus").textContent = "Counts reset."; };
+$("saveBtn").onclick = onSave;
+$("linkBtn").onclick = onLink;
+$("rows").addEventListener("input", (e) => { const t = e.target; if (t.dataset && t.dataset.f && rows[t.dataset.i]) rows[t.dataset.i][t.dataset.f] = t.value; });
+$("rows").addEventListener("click", (e) => { const b = e.target.closest("[data-rm]"); if (!b) return; rows.splice(Number(b.dataset.rm), 1); renderRows(); });
+
+show("home");
+loadData();
+})();
+</script>
+</body>
+</html>
