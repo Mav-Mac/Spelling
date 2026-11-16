@@ -345,7 +345,7 @@ function b64ToBuf(b64) { const s = atob(b64), u = new Uint8Array(s.length); for 
 
 /* Recording queue: one request at a time, waits when Gemini says slow down, gives up after repeated failures. */
 const queue = [];
-let pumping = false, voiceOff = false, hardFails = 0, waits = 0, voiceErr = "";
+let pumping = false, voiceOff = false, hardFails = 0, waits = 0, voiceErr = "", gap = 0;
 function want(text, front) {
   if (!serverOk || voiceOff || !text) return;
   const k = clipKey(text);
@@ -362,10 +362,11 @@ async function pump() {
     try {
       const j = await api("speak", { text: t });
       await clipPut(clipKey(t), b64ToBuf(j.audio));
-      queue.shift(); hardFails = 0; voiceErr = ""; renderStatus();
+      queue.shift(); hardFails = 0; waits = 0; voiceErr = ""; renderStatus();
+      if (gap) await sleep(gap);   // once Gemini has asked us to slow down, keep a steady pace
     } catch (e) {
       voiceErr = describeErr(e); renderStatus();
-      if (e && e.status === 429 && waits < 40) { waits++; await sleep(Math.min(60, Math.max(5, Number(e.retry) || 21)) * 1000); }
+      if (e && e.status === 429 && waits < 6) { waits++; gap = 21000; await sleep(Math.min(90, Math.max(21, Number(e.retry) || 0) * waits) * 1000); }
       else { queue.shift(); hardFails++; if (hardFails >= 3 || (e && e.status === 429)) { voiceOff = true; queue.length = 0; renderStatus(); } }
     }
   }
@@ -387,7 +388,8 @@ async function testVoice() {
     out.textContent = "It works. The clip took " + ((Date.now() - t0) / 1000).toFixed(1) + " seconds. You should hear it now.";
     stopSpeech(); try { await actx.resume(); } catch {} playBuf(buf);
   } catch (e) {
-    out.textContent = e && (e.status || e.message) && !(e instanceof Error) ? "Not working: " + describeErr(e) : "Not working: the clip came back but this device could not play it.";
+    out.textContent = e && e.status === 429 && pumping ? "Gemini is busy recording the word list right now, so the test was turned away. That is normal. Watch the count above instead."
+      : e && (e.status || e.message) && !(e instanceof Error) ? "Not working: " + describeErr(e) : "Not working: the clip came back but this device could not play it.";
   }
 }
 function recordVoices(firstWords) {
