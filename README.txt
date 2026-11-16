@@ -24,6 +24,11 @@ Changing the words
   The password is remembered on that device after the first save.
   Other devices pick up the new list the next time the site is opened.
 
+Natural voice
+  After saving a new list, keep the site open on that device until Setup status says
+  the natural voice is ready. Clips are stored on the site, so every other device
+  then loads them in seconds.
+
 Optional environment variables
   GEMINI_VOICE         default Sulafat (warm). Try Achird, Vindemiatrix or Leda.
   GEMINI_VOICE_STYLE   default "a warm, friendly teacher speaking slowly and clearly to a young child"

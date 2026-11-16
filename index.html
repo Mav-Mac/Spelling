@@ -108,6 +108,17 @@ button.plain:active:not(:disabled) { transform: none; box-shadow: none; }
 .actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .actions .spacer { flex: 1; }
 
+/* Rewards */
+#fx { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 20; }
+#streak { font-family: var(--font-display); font-weight: 800; background: var(--pencil); border: 2px solid var(--ink); border-radius: 999px; padding: 2px 14px; white-space: nowrap; }
+#streak.bump { animation: pop .5s ease-out; }
+#msg.good { animation: cheer .6s ease-out; }
+@keyframes cheer { 0% { transform: scale(.9); } 45% { transform: scale(1.06) rotate(-1deg); } 100% { transform: scale(1); } }
+#shelf { background: var(--paper); border-radius: var(--radius); padding: 12px 20px; max-width: 560px; }
+#shelfStickers, #prizeStickers { font-size: 2.2rem; line-height: 1.3; letter-spacing: .12em; }
+#prize { background: var(--paper); border: 3px dashed var(--pencil-deep); border-radius: var(--radius); padding: 12px 28px; }
+#prizeStickers { font-size: 4.2rem; display: inline-block; animation: prize 1s cubic-bezier(.2, 1.6, .4, 1); }
+@keyframes prize { 0% { transform: scale(0) rotate(-40deg); } 100% { transform: scale(1) rotate(0); } }
 /* Done */
 #done { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; text-align: center; }
 #done h2 { font-size: clamp(2.2rem, 7vw, 3.4rem); }
@@ -148,10 +159,11 @@ textarea { min-height: 110px; resize: vertical; }
   .wrow .sent { grid-column: 1 / -1; grid-row: 2; }
   button.primary, button.go { font-size: 1.25rem; padding: 8px 22px; }
 }
-@media (prefers-reduced-motion: reduce) { #stars li.pop { animation: none; } button:active:not(:disabled) { transform: none; } }
+@media (prefers-reduced-motion: reduce) { #stars li.pop, #streak.bump, #msg.good, #prizeStickers { animation: none; } button:active:not(:disabled) { transform: none; } }
 </style>
 </head>
 <body>
+<canvas id="fx" aria-hidden="true"></canvas>
 <main>
 
 <section id="home" class="screen">
@@ -159,6 +171,7 @@ textarea { min-height: 110px; resize: vertical; }
   <p id="homeCount">Getting your words…</p>
   <p id="exampleNote" class="note" hidden>These are example words. A grown-up can add this week's list.</p>
   <button id="startBtn" class="primary" disabled>Start</button>
+  <div id="shelf"><p class="note" id="shelfNote"></p><p id="shelfStickers"></p></div>
   <button id="parentBtn" class="plain">Grown-ups</button>
 </section>
 
@@ -179,6 +192,7 @@ textarea { min-height: 110px; resize: vertical; }
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
     </button>
     <ol id="stars" aria-label="Stars"></ol>
+    <span id="streak" hidden></span>
     <span id="count"></span>
   </div>
   <div class="listen">
@@ -212,6 +226,7 @@ textarea { min-height: 110px; resize: vertical; }
   <h2>All done!</h2>
   <div id="doneStars"></div>
   <p id="doneScore"></p>
+  <div id="prize" hidden><p class="note" id="prizeNote"></p><p id="prizeStickers"></p></div>
   <div id="missedBox" hidden>
     <p class="note">Words to practice again</p>
     <p id="missedWords"></p>
@@ -250,6 +265,7 @@ textarea { min-height: 110px; resize: vertical; }
       <button id="sentencesBtn" hidden>Write sentences for me</button>
       <button id="clearAll" class="plain">Remove all words</button>
       <button id="clearScores" class="plain">Reset right and missed counts</button>
+      <button id="clearStickers" class="plain">Reset stickers</button>
     </div>
     <div id="pwBox">
       <label for="pw">Parent password</label>
@@ -345,6 +361,7 @@ function b64ToBuf(b64) { const s = atob(b64), u = new Uint8Array(s.length); for 
 
 /* Recording queue: one request at a time, waits when Gemini says slow down, gives up after repeated failures. */
 const queue = [];
+let clipsShared = false;
 let pumping = false, voiceOff = false, hardFails = 0, waits = 0, voiceErr = "", gap = 0;
 function want(text, front) {
   if (!serverOk || voiceOff || !text) return;
@@ -362,8 +379,9 @@ async function pump() {
     try {
       const j = await api("speak", { text: t });
       await clipPut(clipKey(t), b64ToBuf(j.audio));
+      if (j.stored) clipsShared = true;
       queue.shift(); hardFails = 0; waits = 0; voiceErr = ""; renderStatus();
-      if (gap) await sleep(gap);   // once Gemini has asked us to slow down, keep a steady pace
+      if (gap && j.fresh !== false) await sleep(gap);   // once Gemini has asked us to slow down, keep a steady pace
     } catch (e) {
       voiceErr = describeErr(e); renderStatus();
       if (e && e.status === 429 && waits < 6) { waits++; gap = 21000; await sleep(Math.min(90, Math.max(21, Number(e.retry) || 0) * waits) * 1000); }
@@ -495,6 +513,69 @@ document.addEventListener("visibilitychange", async () => {
   if (await fetchShared()) { renderHome(); recordVoices(); }
 });
 
+/* ---------- rewards: confetti, sounds, streaks, stickers (all on the device, no AI needed) ---------- */
+const calm = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const fx = $("fx"), fxc = fx.getContext("2d");
+let bits = [], fxOn = false;
+const COLORS = ["#f7b90f", "#62aede", "#e5536a", "#23875a", "#f28ba0", "#1c2742"];
+function confetti(n, fromX, fromY) {
+  if (calm) return;
+  fx.width = window.innerWidth; fx.height = window.innerHeight;
+  const x0 = fromX == null ? fx.width / 2 : fromX, y0 = fromY == null ? fx.height * 0.45 : fromY;
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, v = 5 + Math.random() * 11;
+    bits.push({ x: x0, y: y0, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 7, r: 5 + Math.random() * 7, c: COLORS[i % COLORS.length], t: 0, life: 70 + Math.random() * 50, spin: Math.random() * 6, star: i % 5 === 0 });
+  }
+  if (!fxOn) { fxOn = true; requestAnimationFrame(fxStep); }
+}
+function fxStep() {
+  fxc.clearRect(0, 0, fx.width, fx.height);
+  bits = bits.filter((b) => b.t < b.life && b.y < fx.height + 30);
+  for (const b of bits) {
+    b.t++; b.vy += 0.42; b.vx *= 0.985; b.x += b.vx; b.y += b.vy; b.spin += 0.2;
+    fxc.save(); fxc.translate(b.x, b.y); fxc.rotate(b.spin);
+    fxc.globalAlpha = Math.max(0, 1 - b.t / b.life); fxc.fillStyle = b.c;
+    if (b.star) { fxc.beginPath(); for (let k = 0; k < 10; k++) { const rr = k % 2 ? b.r * 0.5 : b.r * 1.2, an = k * Math.PI / 5; fxc.lineTo(Math.cos(an) * rr, Math.sin(an) * rr); } fxc.fill(); }
+    else fxc.fillRect(-b.r, -b.r * 0.5, b.r * 2, b.r);
+    fxc.restore();
+  }
+  if (bits.length) requestAnimationFrame(fxStep); else { fxOn = false; fxc.clearRect(0, 0, fx.width, fx.height); }
+}
+function notes(seq, type, vol) {
+  if (!actx || actx.state !== "running") return;
+  try {
+    let t = actx.currentTime + 0.01;
+    for (const [f, d] of seq) {
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = type || "triangle"; o.frequency.value = f;
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol || 0.22, t + 0.015); g.gain.exponentialRampToValueAtTime(0.001, t + d * 1.6);
+      o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + d * 1.7);
+      t += d;
+    }
+  } catch {}
+}
+const sfx = {
+  right: () => notes([[523, .09], [659, .09], [784, .09], [1047, .22]]),
+  streak: () => notes([[523, .08], [659, .08], [784, .08], [1047, .08], [1319, .28]]),
+  miss: () => notes([[392, .14], [330, .22]], "sine", 0.14),
+  finish: () => notes([[523, .12], [523, .12], [523, .12], [659, .3], [587, .12], [659, .12], [784, .45]]),
+};
+const STICKERS = ["🦖","🚀","🦄","🐙","🦊","🐢","🦁","🐳","🦉","🐝","🌈","⚽","🎸","🍕","🦕","🐧","🚂","🐉","🦋","🍦","🏆","👑","🛸","🐼"];
+const LS_STICK = "spellingpad.stickers";
+let stickers = lsGet(LS_STICK) || [];
+function earnSticker() {
+  const fresh = STICKERS.filter((x) => !stickers.includes(x));
+  const pool = fresh.length ? fresh : STICKERS;
+  const got = pool[Math.floor(Math.random() * pool.length)];
+  stickers.push(got); lsSet(LS_STICK, stickers);
+  return got;
+}
+function renderShelf() {
+  $("shelfNote").textContent = stickers.length ? "My stickers (" + stickers.length + ")" : "Finish all your words to win a sticker!";
+  $("shelfStickers").textContent = stickers.join(" ");
+  $("shelfStickers").hidden = !stickers.length;
+}
+
 /* ---------- screens ---------- */
 const SCREENS = ["home", "gate", "play", "done", "parent"];
 let S = { screen: "home", words: [], queue: [], idx: 0, phase: "write", results: {}, read: "", viaAi: false, msg: "", kind: "" };
@@ -505,13 +586,14 @@ function renderHome() {
   $("homeCount").textContent = loaded ? n + (n === 1 ? " word" : " words") + " ready" : "Getting your words…";
   $("exampleNote").hidden = !(loaded && usingExamples);
   $("startBtn").disabled = !loaded || n === 0;
+  renderShelf();
 }
 
 /* ---------- a round ---------- */
 function startRound(words) {
   if (!words.length) return;
   unlockAudio();
-  S = { screen: "play", words: words.map((x) => ({ w: x.w, s: x.s })), queue: words.map((x) => ({ w: x.w, s: x.s, retry: false })), idx: 0, phase: "write", results: {}, read: "", viaAi: false, msg: "", kind: "" };
+  S = { screen: "play", words: words.map((x) => ({ w: x.w, s: x.s })), queue: words.map((x) => ({ w: x.w, s: x.s, retry: false })), idx: 0, phase: "write", results: {}, read: "", viaAi: false, msg: "", kind: "", streak: 0, prize: [] };
   strokes = [];
   show("play"); renderPlay(); sizePad();
   recordVoices(S.words.slice().reverse());
@@ -560,6 +642,17 @@ function renderPlay(popWord) {
   $("nextBtn").textContent = S.idx >= S.queue.length - 1 ? "Finish" : "Next word";
   $("overrideBtn").hidden = !(ph === "copy" && S.viaAi && !it.retry && S.results[it.w] !== "right");
   $("msg").textContent = S.msg; $("msg").className = S.kind;
+  const sk = $("streak");
+  sk.hidden = !(S.streak >= 2);
+  sk.textContent = S.streak + " in a row!";
+}
+function celebrate(firstTry) {
+  if (firstTry) S.streak = (S.streak || 0) + 1;
+  const big = firstTry && S.streak >= 3;
+  const r = $("padWrap").getBoundingClientRect();
+  confetti(big ? 170 : firstTry ? 90 : 35, r.left + r.width / 2, r.top + r.height / 3);
+  if (big) sfx.streak(); else sfx.right();
+  if (firstTry && S.streak >= 2) { const sk = $("streak"); sk.classList.remove("bump"); void sk.offsetWidth; sk.classList.add("bump"); }
 }
 function markRight(it) { S.results[it.w] = it.retry ? "fixed" : "right"; }
 function markMiss(it) {
@@ -598,11 +691,12 @@ async function onCheck() {
   if (seen.includes(norm(it.w))) {
     if (from === "write") markRight(it);
     S.phase = "right";
+    celebrate(from === "write" && !it.retry);
     setMsg(from === "write" ? P.yes : P.copied, "good");
     renderPlay(from === "write" && !it.retry ? it.w : null);
     say(from === "write" ? P.yes : P.copied);
   } else if (from === "write") {
-    markMiss(it);
+    markMiss(it); S.streak = 0; sfx.miss();
     S.phase = "copy"; strokes = []; drawPad();
     setMsg("Not quite. I read “" + S.read + "”. Copy the word on the lines.", "try");
     renderPlay(); say(P.miss);
@@ -615,8 +709,8 @@ async function onCheck() {
 function onSelf(yes) {
   const it = cur();
   if (!it) return;
-  if (yes) { markRight(it); next(); return; }
-  markMiss(it);
+  if (yes) { markRight(it); celebrate(!it.retry); next(); return; }
+  markMiss(it); S.streak = 0; sfx.miss();
   S.phase = "copy"; strokes = []; drawPad();
   setMsg(P.copy, "try"); renderPlay(); say(P.copy);
 }
@@ -625,7 +719,7 @@ function onOverride() {
   if (!it) return;
   S.results[it.w] = "right";
   for (let i = S.queue.length - 1; i > S.idx; i--) if (S.queue[i].retry && S.queue[i].w === it.w) { S.queue.splice(i, 1); break; }
-  S.phase = "right"; setMsg("Counted as right.", "good"); renderPlay(it.w);
+  S.phase = "right"; celebrate(true); setMsg("Counted as right.", "good"); renderPlay(it.w);
 }
 function next() {
   S.idx += 1; strokes = []; S.read = ""; S.viaAi = false;
@@ -639,7 +733,12 @@ function finish() {
     progress[x.w] = p;
   }
   lsSet(LS_PROG, progress);
-  show("done"); renderDone(); say(P.done);
+  const perfect = S.words.every((x) => S.results[x.w] === "right");
+  S.prize = [earnSticker()];
+  if (perfect && S.words.length > 1) S.prize.push(earnSticker());
+  show("done"); renderDone();
+  sfx.finish(); confetti(perfect ? 260 : 150); setTimeout(() => confetti(perfect ? 200 : 90, window.innerWidth * 0.25, window.innerHeight * 0.35), 350); setTimeout(() => confetti(perfect ? 200 : 90, window.innerWidth * 0.75, window.innerHeight * 0.35), 650);
+  setTimeout(() => say(P.done), 900);
 }
 function renderDone() {
   const right = S.words.filter((x) => S.results[x.w] === "right");
@@ -649,6 +748,11 @@ function renderDone() {
   $("missedBox").hidden = missed.length === 0;
   $("missedWords").textContent = missed.map((x) => x.w).join("   ");
   $("missedBtn").hidden = missed.length === 0;
+  const pz = S.prize || [];
+  $("prize").hidden = !pz.length;
+  $("prizeNote").textContent = pz.length > 1 ? "Every word right! Two new stickers!" : "You won a new sticker!";
+  $("prizeStickers").textContent = pz.join(" ");
+  $("done").querySelector("h2").textContent = missed.length ? "All done!" : "Perfect!";
 }
 
 /* ---------- writing pad ---------- */
@@ -765,11 +869,14 @@ async function renderStatus() {
   let v = "";
   if (aiReady()) {
     const keys = new Set(await clipKeys());
-    const have = list.filter((x) => keys.has(clipKey(x.w))).length;
-    v = voiceOff ? "The natural voice could not be recorded right now (" + have + " of " + list.length + " words ready). The device voice fills in. Reload the page later to try again."
-      : have >= list.length ? "Natural voice is ready for all " + list.length + " words on this device."
-      : "Recording the natural voice: " + have + " of " + list.length + " words ready on this device. This can take a few minutes on a free Gemini key. The device voice fills in until then.";
-    if (voiceErr) v += " Last problem: " + voiceErr + ".";
+    const need = usingExamples ? [] : list.map((x) => x.w).concat(Object.keys(P).map((k) => P[k]), list.filter((x) => x.s).map((x) => x.s));
+    const have = need.filter((t) => keys.has(clipKey(t))).length;
+    const where = clipsShared ? " Clips are kept on the site, so other devices load them in seconds." : "";
+    v = usingExamples ? "The natural voice is recorded once you save your own word list."
+      : voiceOff ? "The natural voice could not be recorded right now (" + have + " of " + need.length + " clips ready). The device voice fills in. Reload the page later to try again."
+      : have >= need.length ? "Natural voice is ready: all " + need.length + " clips." + where
+      : "Recording the natural voice: " + have + " of " + need.length + " clips ready. Keep this page open until it finishes. The device voice fills in until then." + where;
+    if (voiceErr && have < need.length) v += " Last problem: " + voiceErr + ".";
   } else if (serverChecked) v = "Using this device's built-in voice.";
   $("voiceStatus").textContent = v;
 }
@@ -828,7 +935,7 @@ async function onSave() {
   try {
     const r = await fetch("/api/words", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pw, words }) });
     const j = await r.json().catch(() => ({}));
-    if (r.ok) { lsSet(LS_PW, pw); local(); st.className = "ok"; st.textContent = "Saved " + words.length + " words. Every device will show this list."; }
+    if (r.ok) { lsSet(LS_PW, pw); local(); st.className = "ok"; st.textContent = "Saved " + words.length + " words. Every device will show this list." + (aiReady() ? " Keep this page open while the natural voice records (see Setup status below)." : ""); }
     else if (r.status === 401) { st.className = "bad"; st.textContent = "Not saved. That password is not right."; }
     else { st.className = "bad"; st.textContent = "Not saved. The site could not store the list" + (j.error ? " (" + j.error + ")" : "") + ". Your words are still here; try again."; }
   } catch { st.className = "bad"; st.textContent = "Not saved. Check the internet connection and try again."; }
@@ -867,6 +974,7 @@ $("sentencesBtn").onclick = onSentences;
 $("clearAll").onclick = () => { rows = []; renderRows(); $("toolStatus").textContent = "All words removed. Tap Save list to keep this change."; };
 $("clearScores").onclick = () => { progress = {}; lsSet(LS_PROG, progress); renderRows(); $("toolStatus").textContent = "Counts reset."; };
 $("saveBtn").onclick = onSave;
+$("clearStickers").onclick = () => { stickers = []; lsSet(LS_STICK, stickers); renderShelf(); $("toolStatus").textContent = "Stickers reset."; };
 $("voiceTestBtn").onclick = testVoice;
 $("rows").addEventListener("input", (e) => { const t = e.target; if (t.dataset && t.dataset.f && rows[t.dataset.i]) rows[t.dataset.i][t.dataset.f] = t.value; });
 $("rows").addEventListener("click", (e) => { const b = e.target.closest("[data-rm]"); if (!b) return; rows.splice(Number(b.dataset.rm), 1); renderRows(); });
